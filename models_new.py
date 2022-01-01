@@ -1,0 +1,175 @@
+import numpy as np
+import extra
+from scipy.stats import multivariate_normal as mvn
+from scipy.stats import binom
+
+class lgss(object):
+    """Linear Gaussian state space model"""
+
+    # X(t+1) = q(x(t),y(t),t) + qv(x(t),y(t),t)*v(t)
+    # Y(t) = g(x(t),y(t),t) + gv(x(t),y(t),t)*e(t)
+    #
+
+    nPar = 4;
+    par = np.zeros(4);
+    maxPdf = 0;
+    Xdim = 1;
+
+    #def updateParams(self, arr):
+     #   self.par[2] = arr[0]
+
+    def updateMaxPdf(self):
+        # self.maxPdf = - 0.5 * np.log(2*np.pi*self.par[1]**2)
+        self.maxPdf = extra.logNormPdf(0, 0, self.par[1]);
+
+    def q(self, xt, yt, tt):
+        return self.par[0] * xt;
+
+    def qv(self, xt, yt, tt):
+        return self.par[1] * np.ones_like(xt);
+
+    def g(self, xt, yt, tt):
+        return self.par[2] * xt;
+
+    def gv(self, xt, yt, tt):
+        return self.par[3] * np.ones_like(xt);
+
+    def weightFun(self, xt, yt, tt):
+        weights = extra.logNormPdf(yt, self.g(xt, yt, tt), self.gv(xt, yt, tt));
+        return weights
+
+    def propagate(self, xt, yt, tt, nPart):
+        q_part = self.q(xt, yt, tt)
+        qv_part = self.qv(xt, yt, tt)
+        w_part = np.random.randn(nPart, self.Xdim)
+        # print q_part.shape
+        # print qv_part.shape
+        # print w_part.shape
+
+        # print type(q_part)
+        # print type(qv_part)
+
+        # print type(w_part)
+        x_new = q_part + qv_part * w_part
+        # print x_new.shape
+        return x_new
+
+    def logTransProb(self, xtN, xtO, yt, tt):
+        return extra.logNormPdf(xtN, self.q(xtO, yt, tt), self.qv(xtO, yt, tt)) - self.maxPdf
+
+    def __str__(self):
+        return "Linear Gaussian SSM \n X(t+1) = {0} * X(t) + {1} * v(t+1) \n Y(t) = {2} * X(t) + {3} * e(t)".format(
+            self.par[0], self.par[1], self.par[2], self.par[3])
+    
+    def h_func(self,xt,xtprev,ytprev,tt,nPart):
+        a=np.zeros((self.nPar, nPart))
+        a[0,:]=((xt-self.q(xtprev,ytprev,tt))*xtprev/self.par[1]**2).squeeze()
+        a[1,:]=((xt-self.q(xtprev,ytprev,tt))**2/self.par[1]**3).squeeze()-1/(self.par[1])
+        a[2,:]=((ytprev-self.g(xtprev,ytprev,tt))*xtprev/self.par[3]**2).squeeze()
+        return a
+    
+    def zeta1(self,xt,yt,nPart,tt):
+        a=np.zeros((self.nPar, nPart))
+        a[2,:]=(np.exp(self.weightFun(xt, yt, tt)))*(yt-self.g(xt,yt,tt)).squeeze()*xt.squeeze()/(self.par[3])**2
+        return a
+    
+    def updateParams(self,arr):
+        self.par[0]=0.7
+        self.par[1]=0.2
+        self.par[2]=arr[2]
+        self.par[3]=1
+    
+
+class stochVol(object):
+    """docstring for stochVol"""
+
+    # X(t+1) = q(x(t),y(t),t) + qv(x(t),y(t),t)*v(t)
+    # Y(t) = g(x(t),y(t),t) + gv(x(t),y(t),t)*e(t)
+    #
+
+    nPar = 3;
+    par = np.zeros(3);
+    maxPdf = 0;
+    Xdim = 1;
+
+    def updateMaxPdf(self):
+        # self.maxPdf = - 0.5 * np.log(2*np.pi*self.par[1]**2)
+        self.maxPdf = extra.logNormPdf(0, 0, self.par[1])
+
+    def q(self, xt, yt, tt):
+        return self.par[0] * xt;
+
+    def qv(self, xt, yt, tt):
+        return self.par[1] * np.ones_like(xt)
+
+    def g(self, xt, yt, tt):
+        return np.zeros_like(xt)
+
+    def gv(self, xt, yt, tt):
+        return self.par[2] * np.exp(0.5 * xt);
+
+    def weightFun(self, xt, yt, tt):
+        weights = extra.logNormPdf(yt, self.g(xt, yt, tt), self.gv(xt, yt, tt));
+        return weights  # [:,0]
+
+    def propagate(self, xt, yt, tt, nPart):
+        return self.q(xt, yt, tt) + self.qv(xt, yt, tt) * np.random.randn(nPart, self.Xdim);
+
+    def logTransProb(self, xtN, xtO, yt, tt):
+        return extra.logNormPdf(xtN, self.q(xtO, yt, tt), self.qv(xtO, yt, tt)) - self.maxPdf
+
+    def __str__(self):
+        return "Stochastic volatility model \n X(t+1) = {0} * X(t) + {1} * v(t+1) \n Y(t) = {2} * exp(0.5 * X(t)) * e(t)".format(
+            self.par[0], self.par[1], self.par[2])
+    
+    def h_func(self,xt,xtprev,ytprev,tt,nPart):
+        a=np.zeros((self.nPar, nPart))
+        a[0,:]=((xt-self.q(xtprev,ytprev,tt))*xtprev/self.par[1]**2).squeeze()
+        a[1,:]=((xt-self.q(xtprev,ytprev,tt))**2/self.par[1]**3).squeeze() - 1/(self.par[1])
+        a[2,:]=((ytprev**2)/(np.exp(xtprev)*self.par[2]**3)).squeeze() - 1/(self.par[2])
+        return a
+    
+    def zeta1(self,xt,yt,nPart,tt):
+        a=np.zeros((self.nPar, nPart))
+        num=(np.exp(self.weightFun(xt, yt, tt))*yt**2).squeeze()
+        denom=(np.exp(xt)*self.par[2]**3).squeeze()
+        a[2,:]=num/denom - (np.exp(self.weightFun(xt, yt, tt))/self.par[2]).squeeze()
+        return a
+    
+    def updateParams(self,arr):
+        self.par[0]=arr[0]
+        self.par[1]=arr[1]
+        self.par[2]=arr[2]
+        
+    def h_func_log(self,xt,xtprev,ytprev,tt,nPart):
+        a=np.zeros((self.nPar,nPart))
+        p=self.transform_sigma(self.par[1])
+        q=self.transform_beta(self.par[2])
+        a[0,:]=((xt-self.q(xtprev,ytprev,tt))*xtprev/self.par[1]**2).squeeze()
+        a[1,:]=(-0.5+0.5*(xt-self.par[0]*xtprev)**2*np.exp(-p)).squeeze()
+        a[2,:]=(-0.5+0.5*ytprev**2*np.exp(-xt-q)).squeeze()
+        return(a)
+    
+    def transform_sigma(self,sigma):
+        return np.log(sigma**2)
+    
+    
+    def transform_beta(self,beta):
+        return np.log(beta**2)
+    
+    
+    def zeta1_log(self,xt,yt,nPart,tt):
+        a=np.zeros((self.nPar,nPart))
+        q=self.transform_beta(self.par[2])
+        term_1=np.exp(extra.logNormPdf(yt, np.zeros_like(xt), np.exp((q+xt)/2))).squeeze() #Tricky
+        term_2=(0.5*(yt**2)*(np.exp(-(q+xt)))-0.5).squeeze()
+        a[2,:]=term_1*term_2
+        return(a)
+    
+    def updateParamsLog(self,arr):
+        self.par[0]=arr[0]
+        self.par[1]=np.sqrt(np.exp(arr[1]))
+        self.par[2]=np.sqrt(np.exp(arr[2]))
+        
+
+
